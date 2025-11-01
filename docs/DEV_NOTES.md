@@ -1,0 +1,3 @@
+- Edit Python in files (VS Code), not in PowerShell.
+- Use Set-Content … @' … '@ blocks when pasting from chat.
+- Activate venv each session: .\.venv\Scripts\Activate.ps1

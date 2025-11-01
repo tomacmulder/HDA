@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hdt2"
+version = "0.0.1"
+description = "HDT v2 lean core"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.6",
+  "regex",
+  "html5lib",
+  "markdown-it-py",
+  "langcodes",
+  "python-bidi",
+  "orjson"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hdt*", "scripts*"]
+
+[project.scripts]
+hdt2-run = "scripts.run_pipeline:main"
