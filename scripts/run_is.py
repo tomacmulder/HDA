@@ -85,6 +85,7 @@ def _confirm_gate(args, title: str, files: list[Path] | None = None):
     if resp == "s":
         args.confirm = False  # disable remaining gates
 
+# ---------- small helpers ----------
 def list_created(out_dir: Path):
     names = [
         "statements.jsonl","canon.json",
@@ -128,6 +129,11 @@ def _ensure_defaults(rows, defaults: dict):
             d.setdefault(k, v)
         out.append(d)
     return out
+
+def _warn_if_empty(name: str, rows, hint: str = ""):
+    n = len(rows or [])
+    if n == 0:
+        print(f"[WARN] {name} produced 0 rows. {hint}".rstrip())
 
 def _load_structure_amUs_fallback(statements, s2_controls):
     latest = Path("out/phases/p01_structure/steps/step_02_amus/latest/amus.jsonl")
@@ -175,6 +181,8 @@ def main():
                     help="Pause after each step and show heads; Enter to continue")
     ap.add_argument("--head", type=int, default=int(os.getenv("HDT_HEAD", "5")),
                     help="Lines to preview per file at confirm gates (default: 5)")
+    ap.add_argument("--fail-on-invalid", action="store_true",
+                    help="Exit with code 1 if any validation errors are found")
     ap.add_argument("--no-mirror", action="store_true")
     ap.add_argument("--mirror-mode", default=os.getenv("OUT_MIRROR_MODE","copy"),
                     choices=["copy","symlink","auto"])
@@ -219,7 +227,7 @@ def main():
     sc_rows = stamp_rows(sc_rows, panel, inp, "p02_is.step_01_scaffold")
     dump_jsonl(out_dir / "scaffold.jsonl", sc_rows)
     validation["scaffold.jsonl"] = validate_rows(sc_rows, sc_schema)
-
+    _warn_if_empty("scaffold", sc_rows, "Check AMU mirrors under out\\phases\\p01_structure\\steps\\step_02_amus\\latest or amu guides.")
     _confirm_gate(args, "After 3.1 Scaffold", [out_dir / "scaffold.jsonl"])
 
     # 3.2 Time–Modality–Scope
@@ -236,7 +244,7 @@ def main():
     tm_rows = stamp_rows(tm_rows, panel, inp, "p02_is.step_02_time_modality")
     dump_jsonl(out_dir / "time_modality.jsonl", tm_rows)
     validation["time_modality.jsonl"] = validate_rows(tm_rows, tm_schema)
-
+    _warn_if_empty("time_modality", tm_rows)
     _confirm_gate(args, "After 3.2 Time–Modality–Scope", [out_dir / "time_modality.jsonl"])
 
     # 3.3 Evidence
@@ -251,7 +259,7 @@ def main():
     ev_rows = stamp_rows(ev_rows, panel, inp, "p02_is.step_03_evidential")
     dump_jsonl(out_dir / "evidential.jsonl", ev_rows)
     validation["evidential.jsonl"] = validate_rows(ev_rows, ev_schema)
-
+    _warn_if_empty("evidential", ev_rows)
     _confirm_gate(args, "After 3.3 Evidence", [out_dir / "evidential.jsonl"])
 
     # 3.4 Causal skeleton
@@ -278,7 +286,7 @@ def main():
     ca_rows = stamp_rows(ca_rows, panel, inp, "p02_is.step_04_causal")
     dump_jsonl(out_dir / "causal.jsonl", ca_rows)
     validation["causal.jsonl"] = validate_rows(ca_rows, ca_schema)
-
+    _warn_if_empty("causal", ca_rows, "If scaffold is empty, causal often ends up empty too.")
     _confirm_gate(args, "After 3.4 Causal skeleton", [out_dir / "causal.jsonl"])
 
     # 3.5 Claims (LLM)
@@ -294,14 +302,13 @@ def main():
         claims = extract_claims_llm(statements, audited)
     cl_schema = s35.get_schema("claims", {})
     claims = [ _to_dict(r) for r in (claims or []) ]
-    # Remove fallback field if present
-    claims = [ {k:v for k,v in r.items() if k != "fallback"} for r in claims ]
+    claims = [ {k:v for k,v in r.items() if k != "fallback"} for r in claims ]  # remove fallback if present
     claims = _ensure_claim_ids(claims)
     claims = _project_to_schema(claims, cl_schema)
     claims = stamp_rows(claims, panel, inp, "p02_is.step_05_is_claims")
     dump_jsonl(out_dir / "claims_is.jsonl", claims)
     validation["claims_is.jsonl"] = validate_rows(claims, cl_schema)
-
+    _warn_if_empty("claims_is", claims, "If --offline is set, claims will be empty.")
     _confirm_gate(args, "After 3.5 Claims", [out_dir / "claims_is.jsonl"])
 
     # 3.6 Ontology mapping (basic pass; fill defaults)
@@ -309,7 +316,6 @@ def main():
     persist_prompt_policy(out_dir, "p02_is", "step_06_ontology", s36.get_prompt("main",""))
     print("[7/10] IS 3.6: Ontology mapping")
     on_schema = s36.get_schema("ontology", {})
-    # Start from claims and echo text; create default per-claim path P1
     on_rows = []
     by_claim = { _to_dict(c).get("Claim_ID"): _to_dict(c) for c in claims }
     for p in _paths_from_claims(claims):
@@ -337,7 +343,7 @@ def main():
     on_rows = stamp_rows(on_rows, panel, inp, "p02_is.step_06_ontology")
     dump_jsonl(out_dir / "ontology.jsonl", on_rows)
     validation["ontology.jsonl"] = validate_rows(on_rows, on_schema)
-
+    _warn_if_empty("ontology", on_rows, "If claims are empty, ontology will be empty.")
     _confirm_gate(args, "After 3.6 Ontology mapping", [out_dir / "ontology.jsonl"])
 
     # 3.7 Retrieval (placeholder table: none -> no_data)
@@ -360,7 +366,7 @@ def main():
     rt_rows = stamp_rows(rt_rows, panel, inp, "p02_is.step_07_retrieval")
     dump_jsonl(out_dir / "retrieval.jsonl", rt_rows)
     validation["retrieval.jsonl"] = validate_rows(rt_rows, rt_schema)
-
+    _warn_if_empty("retrieval", rt_rows, "Expected to mirror ontology entries 1:1 (placeholder).")
     _confirm_gate(args, "After 3.7 Retrieval", [out_dir / "retrieval.jsonl"])
 
     # 3.8 Accuracy
@@ -390,7 +396,7 @@ def main():
     acc_rows = stamp_rows(acc_rows, panel, inp, "p02_is.step_08_accuracy")
     dump_jsonl(out_dir / "accuracy.jsonl", acc_rows)
     validation["accuracy.jsonl"] = validate_rows(acc_rows, ac_schema)
-
+    _warn_if_empty("accuracy", acc_rows, "If ontology/retrieval are empty, accuracy will likely be sparse.")
     _confirm_gate(args, "After 3.8 Accuracy & Integrity (accuracy)", [out_dir / "accuracy.jsonl"])
 
     # 3.9 Roll-up per statement
@@ -421,7 +427,7 @@ def main():
     roll = _project_to_schema(roll, int_schema)
     roll = stamp_rows(roll, panel, inp, "p02_is.step_09_integrity_rollup")
     dump_jsonl(out_dir / "analytic_integrity.jsonl", roll)
-
+    _warn_if_empty("analytic_integrity", roll)
     _confirm_gate(args, "After 3.9 Analytic Integrity roll-up", [out_dir / "analytic_integrity.jsonl"])
 
     # Catalog & roll-up is.json
@@ -455,7 +461,17 @@ def main():
     (out_dir / "is.json").write_bytes(orjson.dumps(rollup))
     (out_dir / "validation.json").write_text(orjson.dumps(validation).decode("utf-8"), encoding="utf-8")
 
-    print("[DONE] Created:")
+    # End-of-run summary + optional hard fail
+    print("\n[SUMMARY] row counts")
+    for k in ["statements","scaffold","time_modality","evidential","causal","claims","ontology","retrieval","accuracy","integrity"]:
+        print(f"  {k:16s} {rollup['counts'][k]}")
+    invalid_keys = [k for k, errs in (validation or {}).items() if errs]
+    if invalid_keys:
+        print(f"\n[VALIDATION] Issues detected in: {', '.join(invalid_keys)}")
+        if args.fail_on_invalid:
+            raise SystemExit(1)
+
+    print("\n[DONE] Created:")
     for p in list_created(out_dir): print(f"  - {p}  ({p.stat().st_size} bytes)")
 
     if not args.no_mirror:
