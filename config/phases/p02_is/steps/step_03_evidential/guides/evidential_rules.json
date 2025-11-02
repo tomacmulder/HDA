@@ -1,0 +1,8 @@
+{
+  "empirical_markers": ["data", "measurement", "study", "observed", "survey", "experiment"],
+  "testimonial_markers": ["said", "stated", "according to", "reported by", "source"],
+  "inferential_markers": ["therefore", "implies", "suggests", "indicates"],
+  "theoretical_markers": ["theory", "model", "framework"],
+  "anecdotal_markers": ["in my experience", "I heard", "someone said"],
+  "speculative_markers": ["perhaps", "maybe", "it could be"]
+}

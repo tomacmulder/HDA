@@ -1,0 +1,23 @@
+{
+  "file": "links.jsonl",
+  "columns": [
+    {"name":"Statement_Text_ID","type":"string"},
+    {"name":"Supports_IDs","type":"string"},
+    {"name":"Opposes_IDs","type":"string"},
+    {"name":"References_IDs","type":"string"},
+    {"name":"Relation_Cues","type":"string"},
+    {"name":"Relation_Strength","type":"string"},
+    {"name":"Link_Type","type":"string"},
+    {"name":"Reasoning_Scheme","type":"string"},
+    {"name":"Link_Confidence","type":"number"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "file": "scaffold.jsonl",
+  "columns": [
+    {"name":"AMU_ID","type":"string"},
+    {"name":"Statement_Text_ID","type":"string"},
+    {"name":"Event_Kind","type":"string"},
+    {"name":"Predication","type":"string"},
+    {"name":"Arguments","type":"string"},
+    {"name":"Tense","type":"string"},
+    {"name":"Aspect","type":"string"},
+    {"name":"Voice","type":"string"},
+    {"name":"Negation","type":"string"},
+    {"name":"Negation_Scope","type":"string"},
+    {"name":"Intensionality","type":"string"},
+    {"name":"Event_ID","type":"string"},
+    {"name":"Mechanism_Role","type":"string"},
+    {"name":"Confidence","type":"number"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

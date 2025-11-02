@@ -1,0 +1,13 @@
+{
+    "file":  "coref.jsonl",
+    "columns":  [
+                    {
+                        "name":  "cluster_id",
+                        "type":  "string"
+                    },
+                    {
+                        "name":  "member_mention_ids",
+                        "type":  "string"
+                    }
+                ]
+}

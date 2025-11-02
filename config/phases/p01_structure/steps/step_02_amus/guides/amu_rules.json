@@ -1,0 +1,5 @@
+{
+  "hard_separators": [".","?","!"],
+  "soft_separators": [" — "," – ",";"],
+  "and_but_split_min_len": 120
+}

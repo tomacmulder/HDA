@@ -1,0 +1,8 @@
+{
+  "min_confidence": 0.20,
+  "topics": [
+    {"id":"econ.inflation","label":"Inflation","keywords":["inflation","cpi","prices","cost of living"], "disambiguators":["economy"]},
+    {"id":"policy.tax","label":"Tax Policy","keywords":["tax","revenue","levy","deduction","vat"], "disambiguators":["policy","government"]},
+    {"id":"security.conflict","label":"Conflict","keywords":["war","attack","military","strike","ceasefire"], "disambiguators":["security"]}
+  ]
+}

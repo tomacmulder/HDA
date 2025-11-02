@@ -1,0 +1,21 @@
+{
+  "file": "topics.jsonl",
+  "columns": [
+    {"name":"AMU_ID","type":"string"},
+    {"name":"Topic_ID","type":"string"},
+    {"name":"Topic_Label","type":"string"},
+    {"name":"Topic_Assign_Confidence","type":"number"},
+    {"name":"Topic_Disambiguators","type":"string"},
+    {"name":"Topic_Path_Preview","type":"string"},
+    {"name":"Topic_Granularity","type":"string"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

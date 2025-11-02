@@ -1,64 +1,50 @@
-﻿#!/usr/bin/env python
-from __future__ import annotations
-import argparse, json, pathlib, sys
-
-try:
-    import orjson as _json
-    def dumps(obj): return _json.dumps(obj).decode("utf-8")
-except Exception:
-    def dumps(obj): return json.dumps(obj, ensure_ascii=False)
+﻿from __future__ import annotations
+import argparse, sys, json, glob
+from pathlib import Path
 
 from hdt.core.pipeline.run import run_all_for_path
-from adapters.core_to_chart import to_bubble_chart
+from hdt.core.pipeline.batch import run_many
 
-def _write_json(path: pathlib.Path, obj):
-    path.write_text(dumps(obj), encoding="utf-8")
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="HDT2 pipeline runner")
+    ap.add_argument("inputs", nargs="+", help="File(s), directory(ies), or globs (*.txt, *.md)")
+    ap.add_argument("-o", "--out-dir", default="out", help="Output directory (default: out)")
+    args = ap.parse_args(argv)
 
-def _write_jsonl(path: pathlib.Path, seq):
-    with path.open("w", encoding="utf-8") as f:
-        for item in seq:
-            # Prefer Pydantic model_dump if present
-            if hasattr(item, "model_dump"):
-                f.write(dumps(item.model_dump()) + "\n")
-            else:
-                try:
-                    f.write(dumps(item) + "\n")
-                except TypeError:
-                    # Fallback for pydantic v1-like: .dict()
-                    f.write(dumps(item.dict()) + "\n")
+    # Expand globs and directories
+    expanded = []
+    for s in args.inputs:
+        p = Path(s)
+        if p.is_dir():
+            expanded.extend([str(x) for x in p.glob("*.txt")])
+            expanded.extend([str(x) for x in p.glob("*.md")])
+        elif any(ch in s for ch in "*?[]"):
+            expanded.extend(glob.glob(s))
+        else:
+            expanded.append(str(p))
 
-def main():
-    p = argparse.ArgumentParser(description="Run HDA v2 pipeline on a file")
-    p.add_argument("path", help="Input file (.txt/.md/.srt)")
-    p.add_argument("--encoding", default="utf-8")
-    p.add_argument("--out", default="out", help="Output folder")
-    args = p.parse_args()
+    # De-dup while preserving order
+    seen, files = set(), []
+    for f in expanded:
+        if f not in seen:
+            seen.add(f); files.append(f)
 
-    out_dir = pathlib.Path(args.out)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if len(files) == 0:
+        print("No inputs matched.", file=sys.stderr)
+        return 2
 
-    results = run_all_for_path(args.path, encoding=args.encoding)
-
-    # Canonical doc
-    canon = results["canonical"]
-    if hasattr(canon, "model_dump"):
-        _write_json(out_dir / "canon.json", canon.model_dump())
+    if len(files) == 1 and Path(files[0]).is_file():
+        res = run_all_for_path(files[0])
+        print("Wrote outputs to:", args.out_dir)
+        print(json.dumps({
+            "doc_id": getattr(res["canonical"], "doc_id", "unknown"),
+            "out_dir": str(Path(args.out_dir).resolve())
+        }))
+        return 0
     else:
-        _write_json(out_dir / "canon.json", canon.dict())
-
-    # Rows
-    _write_jsonl(out_dir / "statements.jsonl", results["statements"])
-    _write_jsonl(out_dir / "threads.jsonl", results["threads"])
-    _write_jsonl(out_dir / "links.jsonl", results["links"])
-    _write_jsonl(out_dir / "is_time_modality.jsonl", results["modal"])
-    _write_jsonl(out_dir / "is_evidential.jsonl", results["evidential"])
-    _write_jsonl(out_dir / "is_causal.jsonl", results["causal"])
-
-    # Chart data
-    chart = to_bubble_chart(results["statements"], results["threads"], results["links"])
-    _write_json(out_dir / "chart_data.json", chart)
-
-    print(f"Wrote outputs to: {out_dir}")
+        idx = run_many(files, out_dir=args.out_dir)
+        print(f"Processed {len(idx)} document(s). Index at {Path(args.out_dir,'index.json').resolve()}")
+        return 0
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

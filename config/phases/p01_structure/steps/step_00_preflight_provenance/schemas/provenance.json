@@ -1,0 +1,14 @@
+{
+  "file": "_preflight.jsonl",
+  "columns": [
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

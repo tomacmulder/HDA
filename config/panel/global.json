@@ -1,0 +1,15 @@
+{
+  "model_runtime": {"model_id": "gpt-5.1", "temperature": 0.2, "max_tokens": 1200, "stop": [], "parallelism": 1},
+  "io": {"strict_json": true, "span_indexing": "unicode_codepoint", "lang": "auto", "script": "auto"},
+  "provenance_defaults": {
+    "Schema_Version": "1.1",
+    "Annotator": "model",
+    "Annotator_ID": "HDT.default",
+    "Annotator_Confidence": 0.5,
+    "Review_Status": "unreviewed"
+  },
+  "calibration": {"confidence_method": "rubric", "clamp": [0,1], "rounding_decimals": 2},
+  "recovery": {"allow_span_noindex": true, "unicode_normalization": "NFC", "retry_max": 2},
+  "quality_gates": {"schema_validation": true, "enum_enforcement": true, "id_existence": true, "no_self_loops": true, "contiguous_threads": true},
+  "safety": {"no_paraphrase": true, "fabrication_barred": true}
+}

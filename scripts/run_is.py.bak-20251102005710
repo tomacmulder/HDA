@@ -1,0 +1,410 @@
+﻿from __future__ import annotations
+import os, argparse, hashlib, datetime as dt, orjson, json
+from pathlib import Path
+
+from hdt.core.control_resolver import ControlResolver
+from hdt.core.schema_ops import apply_schema
+from hdt.core.schema_validate import validate_rows
+from hdt.core.pipeline.run import run_all_for_path
+from hdt.core.llm_client import LLMClient
+from hdt.core.llm_client_audit import AuditLLMClient
+from hdt.core.prompt_audit import persist_prompt_policy
+
+from hdt.core.is_analysis.time_modality import analyze as tm_analyze
+from hdt.core.is_analysis.evidential   import assign as ev_assign
+from hdt.core.is_analysis.scaffold     import analyze_amus as scaffold_from_amus
+from hdt.core.is_analysis.causal       import build_scm
+from hdt.core.is_analysis.ontology     import map_statements
+from hdt.core.is_analysis.accuracy     import score_statements
+from hdt.core.is_analysis.claims       import extract_claims_llm
+
+from hdt.core.amu import amuize
+from hdt.core.output_router import mirror_artifacts
+from hdt.core.provenance import stamp_rows
+
+def sha1(path: Path) -> str:
+    h = hashlib.sha1()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""): h.update(chunk)
+    return h.hexdigest()
+
+def _rowify(r): return r.model_dump() if hasattr(r, "model_dump") else r
+
+def dump_json(path: Path, obj):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(orjson.dumps(obj))
+
+def dump_jsonl(path: Path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "wb") as f:
+        for r in (rows or []):
+            f.write(orjson.dumps(_rowify(r))); f.write(b"\n")
+
+def list_created(out_dir: Path):
+    names = [
+        "statements.jsonl","canon.json",
+        "scaffold.jsonl","time_modality.jsonl","evidential.jsonl","causal.jsonl",
+        "claims_is.jsonl","ontology.jsonl","retrieval.jsonl","accuracy.jsonl",
+        "analytic_integrity.jsonl","is.json","_controls_catalog.md","validation.json"
+    ]
+    return [out_dir / n for n in names if (out_dir / n).exists()]
+
+def _to_dict(r):
+    if isinstance(r, dict): return r
+    for a in ("model_dump","dict"):
+        fn = getattr(r,a,None)
+        if callable(fn):
+            try:
+                d = fn()
+                if isinstance(d, dict): return d
+            except Exception: pass
+    return {}
+
+def _rename_keys(row, mapping):
+    d = _to_dict(row)
+    return { (mapping.get(k, k)): v for k, v in d.items() }
+
+def _project_to_schema(rows, schema):
+    if not schema: return [ _to_dict(r) for r in rows ]
+    cols = [c.get("name") for c in (schema.get("columns") or [])]
+    if not cols: return [ _to_dict(r) for r in rows ]
+    out = []
+    for r in rows:
+        d = _to_dict(r)
+        pr = {k: d.get(k) for k in cols if k in d}
+        out.append(pr)
+    return out
+
+def _ensure_defaults(rows, defaults: dict):
+    out = []
+    for r in rows:
+        d = _to_dict(r)
+        for k,v in (defaults or {}).items():
+            d.setdefault(k, v)
+        out.append(d)
+    return out
+
+def _load_structure_amUs_fallback(statements, s2_controls):
+    latest = Path("out/phases/p01_structure/steps/step_02_amus/latest/amus.jsonl")
+    if latest.exists():
+        rows = []
+        with latest.open("rb") as f:
+            for line in f:
+                try: rows.append(orjson.loads(line))
+                except Exception: pass
+        return rows
+    guide_amu = s2_controls.get_guide("amu_rules", {}) if s2_controls else {}
+    return amuize(statements, guides=guide_amu)
+
+def _ensure_claim_ids(rows):
+    by_stmt = {}
+    out = []
+    for r in rows:
+        d = _to_dict(r)
+        sid = d.get("Statement_Text_ID") or "S0"
+        seq = by_stmt.get(sid, 0) + 1
+        by_stmt[sid] = seq
+        d.setdefault("Claim_ID", f"{sid}_C{seq}")
+        out.append(d)
+    return out
+
+def _paths_from_claims(claims):
+    # deterministic Path_ID order per claim
+    out = []
+    for cl in claims:
+        d = _to_dict(cl)
+        cid = d.get("Claim_ID")
+        sid = d.get("Statement_Text_ID")
+        if not cid: continue
+        out.append({"Path_ID": f"{cid}_P1", "Claim_ID": cid, "Statement_Text_ID": sid})
+    return out
+
+def main():
+    ap = argparse.ArgumentParser(description="IS runner — 3.1..3.9")
+    ap.add_argument("-i","--in",  dest="inp", default=r"data\ingest\INPUT.md")
+    ap.add_argument("-o","--out", dest="out", default="out")
+    ap.add_argument("--run-tag", default=None)
+    ap.add_argument("--offline", action="store_true")
+    ap.add_argument("--show",    action="store_true")
+    ap.add_argument("--no-mirror", action="store_true")
+    ap.add_argument("--mirror-mode", default=os.getenv("OUT_MIRROR_MODE","copy"),
+                    choices=["copy","symlink","auto"])
+    args = ap.parse_args()
+
+    inp = Path(args.inp); out_root = Path(args.out)
+    out_dir = (out_root / "runs" / args.run_tag) if args.run_tag else out_root
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    resolver = ControlResolver("config")
+    panel = json.loads(Path("config/panel/global.json").read_text(encoding="utf-8"))
+
+    # Structure pass -> statements/canon
+    s1 = resolver.for_step("p01_structure","step_01_segmentation")
+    print(f"[1/10] Structure pass on {inp} -> {out_dir}")
+    res = run_all_for_path(str(inp))
+    statements = res.get("statements", [])
+    canon      = res.get("canon", {}) or {"note":"canon unavailable","counts":{"statements":len(statements)}}
+    dump_jsonl(out_dir / "statements.jsonl", stamp_rows(statements, panel, inp, "p02_is.bootstrap"))
+    dump_json(out_dir  / "canon.json", canon)
+
+    offline = args.offline or os.getenv("HDT_OFFLINE") == "1"
+    validation = {}
+
+    # 3.1 Scaffold
+    s31 = resolver.for_step("p02_is","step_01_scaffold")
+    persist_prompt_policy(out_dir, "p02_is", "step_01_scaffold", s31.get_prompt("main",""))
+    print("[2/10] IS 3.1: Scaffold (AMUs -> scaffold)")
+    s2_controls = resolver.for_step("p01_structure","step_02_amus")
+    amus = _load_structure_amUs_fallback(statements, s2_controls)
+    sc_schema = s31.get_schema("scaffold", {})
+    sc_rows = scaffold_from_amus(amus, guides=s31)
+    # Defaults + projection + stamp
+    sc_rows = [ _rename_keys(r, {"statement_id":"Statement_Text_ID"}) for r in sc_rows ]
+    sc_rows = _ensure_defaults(sc_rows, {
+        "Tense":"generic","Aspect":"none","Voice":"NA",
+        "Negation_Scope":"[]","Event_ID":"", "Mechanism_Role":"", "Confidence":0.6
+    })
+    sc_rows = _project_to_schema(sc_rows, sc_schema)
+    sc_rows = stamp_rows(sc_rows, panel, inp, "p02_is.step_01_scaffold")
+    dump_jsonl(out_dir / "scaffold.jsonl", sc_rows)
+    validation["scaffold.jsonl"] = validate_rows(sc_rows, sc_schema)
+
+    # 3.2 Time–Modality–Scope
+    s32 = resolver.for_step("p02_is","step_02_time_modality")
+    persist_prompt_policy(out_dir, "p02_is", "step_02_time_modality", s32.get_prompt("main",""))
+    print("[3/10] IS 3.2: Time–Modality–Scope")
+    tm_schema = s32.get_schema("time_modality", {})
+    tm_rows = tm_analyze(statements, guides=s32)
+    tm_rows = [ _rename_keys(r, {"statement_id":"Statement_Text_ID"}) for r in tm_rows ]
+    tm_rows = _ensure_defaults(tm_rows, {
+        "Alethic_Modality":"", "Evidential_Mode":"", "Scope_Population":"", "Spatial_Frame":""
+    })
+    tm_rows = _project_to_schema(tm_rows, tm_schema)
+    tm_rows = stamp_rows(tm_rows, panel, inp, "p02_is.step_02_time_modality")
+    dump_jsonl(out_dir / "time_modality.jsonl", tm_rows)
+    validation["time_modality.jsonl"] = validate_rows(tm_rows, tm_schema)
+
+    # 3.3 Evidence
+    s33 = resolver.for_step("p02_is","step_03_evidential")
+    persist_prompt_policy(out_dir, "p02_is", "step_03_evidential", s33.get_prompt("main",""))
+    print("[4/10] IS 3.3: Evidence")
+    ev_schema = s33.get_schema("evidential", {})
+    ev_rows = ev_assign(statements, guides=s33)
+    ev_rows = [ _rename_keys(r, {"statement_id":"Statement_Text_ID"}) for r in ev_rows ]
+    ev_rows = _ensure_defaults(ev_rows, {"Evidence_Quality":"unspecified","Evidence_Cue_Spans":"[]","Confidence":0.5})
+    ev_rows = _project_to_schema(ev_rows, ev_schema)
+    ev_rows = stamp_rows(ev_rows, panel, inp, "p02_is.step_03_evidential")
+    dump_jsonl(out_dir / "evidential.jsonl", ev_rows)
+    validation["evidential.jsonl"] = validate_rows(ev_rows, ev_schema)
+
+    # 3.4 Causal skeleton
+    s34 = resolver.for_step("p02_is","step_04_causal")
+    persist_prompt_policy(out_dir, "p02_is", "step_04_causal", s34.get_prompt("main",""))
+    print("[5/10] IS 3.4: Causal skeleton")
+    ca_schema = s34.get_schema("causal", {})
+    ca_rows = build_scm(sc_rows, guides=s34)
+    # Pack nodes/edges/assumptions into strings if native types
+    def _pack(x):
+        import json as _j
+        if isinstance(x, (list, dict)): return _j.dumps(x)
+        return x if isinstance(x,str) else ""
+    ca_rows2 = []
+    for r in ca_rows:
+        d = _to_dict(r)
+        ca_rows2.append({
+            "SCM_Nodes": _pack(d.get("SCM_Nodes", [])),
+            "SCM_Edges": _pack(d.get("SCM_Edges", [])),
+            "Assumptions": _pack(d.get("Assumptions", {"no_unmeasured_confounding": False, "positivity": False, "consistency": False})),
+            "Mechanism_Role": d.get("Mechanism_Role","")
+        })
+    ca_rows = _project_to_schema(ca_rows2, ca_schema)
+    ca_rows = stamp_rows(ca_rows, panel, inp, "p02_is.step_04_causal")
+    dump_jsonl(out_dir / "causal.jsonl", ca_rows)
+    validation["causal.jsonl"] = validate_rows(ca_rows, ca_schema)
+
+    # 3.5 Claims (LLM)
+    s35 = resolver.for_step("p02_is","step_05_is_claims")
+    persist_prompt_policy(out_dir, "p02_is", "step_05_is_claims", s35.get_prompt("main",""))
+    print(f"[6/10] IS 3.5: Claims {'(offline)' if offline else ''}")
+    if offline:
+        claims = []
+    else:
+        sys_prefix = s35.get_prompt("main","").strip()
+        audited = AuditLLMClient(LLMClient(), decisions_dir=(out_dir / "_decisions"),
+                                 step_slug="step_05_is_claims", system_prefix=sys_prefix)
+        claims = extract_claims_llm(statements, audited)
+    cl_schema = s35.get_schema("claims", {})
+    claims = [ _to_dict(r) for r in (claims or []) ]
+    # Remove fallback field if present
+    claims = [ {k:v for k,v in r.items() if k != "fallback"} for r in claims ]
+    claims = _ensure_claim_ids(claims)
+    claims = _project_to_schema(claims, cl_schema)
+    claims = stamp_rows(claims, panel, inp, "p02_is.step_05_is_claims")
+    dump_jsonl(out_dir / "claims_is.jsonl", claims)
+    validation["claims_is.jsonl"] = validate_rows(claims, cl_schema)
+
+    # 3.6 Ontology mapping (basic pass; fill defaults)
+    s36 = resolver.for_step("p02_is","step_06_ontology")
+    persist_prompt_policy(out_dir, "p02_is", "step_06_ontology", s36.get_prompt("main",""))
+    print("[7/10] IS 3.6: Ontology mapping")
+    on_schema = s36.get_schema("ontology", {})
+    # Start from claims and echo text; create default per-claim path P1
+    on_rows = []
+    by_claim = { _to_dict(c).get("Claim_ID"): _to_dict(c) for c in claims }
+    for p in _paths_from_claims(claims):
+        cid = p["Claim_ID"]; sid = p["Statement_Text_ID"]; pid = p["Path_ID"]
+        cl = by_claim.get(cid, {})
+        row = {
+          "Path_ID": pid, "Claim_ID": cid, "Statement_Text_ID": sid,
+          "Claim_Text": cl.get("Text_Span",""), "Claim_As_Spoken": cl.get("Text_Span",""),
+          "Canonical_Proposition": cl.get("Text_Span",""),
+          "Polarity": cl.get("Polarity","affirmative"),
+          "Hedges": "[]",
+          "Epistemic_Strength": cl.get("Epistemic_Strength", 0.5),
+          "Claim_Type": cl.get("Claim_Type","descriptive"),
+          "Primary_Topic_Path": "", "Primary_Topic_Labels": "", "Primary_Topic_Confidence": 0.0,
+          "Secondary_Topic_Paths": "[]",
+          "Fabric_Axis":"", "Emergent_Layer_Code":"", "Emergent_Layer_Name":"", "Emergent_Layer_SubLayer":"",
+          "Constraint_Vector":"", "Substrate":"", "Derived_Layer_Code":"", "Derived_Layer_Path":"",
+          "Topic_Match_Spans":"[]", "Constraint_Evidence":"[]", "Entity_Linkings":"[]",
+          "Relation_Type":"", "Unit_System":"", "Knowledge_Domain":"unspecified",
+          "Retrieved_Fact_Summary":"", "Evidence_Confidence":0.0, "Evidence_Status":"no_data",
+          "Primary_Sources":"[]", "Update_Timestamp":""
+        }
+        on_rows.append(row)
+    on_rows = _project_to_schema(on_rows, on_schema)
+    on_rows = stamp_rows(on_rows, panel, inp, "p02_is.step_06_ontology")
+    dump_jsonl(out_dir / "ontology.jsonl", on_rows)
+    validation["ontology.jsonl"] = validate_rows(on_rows, on_schema)
+
+    # 3.7 Retrieval (placeholder table: none -> no_data)
+    s37 = resolver.for_step("p02_is","step_07_retrieval")
+    persist_prompt_policy(out_dir, "p02_is", "step_07_retrieval", s37.get_prompt("main",""))
+    print("[8/10] IS 3.7: Retrieval (placeholder)")
+    rt_schema = s37.get_schema("retrieval", {})
+    rt_rows = []
+    for r in on_rows:
+        d = _to_dict(r)
+        rt_rows.append({
+          "Path_ID": d.get("Path_ID"), "Claim_ID": d.get("Claim_ID"), "Statement_Text_ID": d.get("Statement_Text_ID"),
+          "Retrieved_Fact_Summary": d.get("Retrieved_Fact_Summary",""),
+          "Evidence_Confidence": d.get("Evidence_Confidence",0.0),
+          "Evidence_Status": d.get("Evidence_Status","no_data"),
+          "Primary_Sources": d.get("Primary_Sources","[]"),
+          "Update_Timestamp": d.get("Update_Timestamp","")
+        })
+    rt_rows = _project_to_schema(rt_rows, rt_schema)
+    rt_rows = stamp_rows(rt_rows, panel, inp, "p02_is.step_07_retrieval")
+    dump_jsonl(out_dir / "retrieval.jsonl", rt_rows)
+    validation["retrieval.jsonl"] = validate_rows(rt_rows, rt_schema)
+
+    # 3.8 Accuracy
+    s38 = resolver.for_step("p02_is","step_08_accuracy")
+    persist_prompt_policy(out_dir, "p02_is", "step_08_accuracy", s38.get_prompt("main",""))
+    print("[9/10] IS 3.8: Accuracy & Integrity")
+    ac_schema = s38.get_schema("accuracy", {})
+    acc_rows = score_statements(statements, rt_rows, tm_rows, controls=s38)
+    # Fill/derive invariants and keys
+    acc2 = []
+    for r in acc_rows:
+        d = _rename_keys(r, {"statement_id":"Statement_Text_ID"})
+        d.setdefault("Fact_Accuracy", 0.0)
+        d["Bullshit_Index"] = round(1.0 - float(d.get("Fact_Accuracy",0.0)), 2)
+        d.setdefault("Evidence_Match_Type","no_data")
+        d.setdefault("Accuracy_Notes","")
+        d.setdefault("Flag_Potential_Misinfo","false")
+        d.setdefault("Misinformation_Tags","[]")
+        # Path/Claim may be absent depending on scorer; patch with first path for that statement if any
+        sid = d.get("Statement_Text_ID")
+        first_path = next((x.get("Path_ID") for x in on_rows if x.get("Statement_Text_ID")==sid), "")
+        first_claim = next((x.get("Claim_ID") for x in on_rows if x.get("Statement_Text_ID")==sid), "")
+        d.setdefault("Path_ID", first_path); d.setdefault("Claim_ID", first_claim)
+        d.setdefault("Analytic_Integrity", float(d.get("Fact_Accuracy",0.0)))
+        acc2.append(d)
+    acc_rows = _project_to_schema(acc2, ac_schema)
+    acc_rows = stamp_rows(acc_rows, panel, inp, "p02_is.step_08_accuracy")
+    dump_jsonl(out_dir / "accuracy.jsonl", acc_rows)
+    validation["accuracy.jsonl"] = validate_rows(acc_rows, ac_schema)
+
+    # 3.9 Roll-up per statement
+    s39 = resolver.for_step("p02_is","step_09_integrity_rollup")
+    persist_prompt_policy(out_dir, "p02_is", "step_09_integrity_rollup", s39.get_prompt("main",""))
+    print("[10/10] IS 3.9: Analytic Integrity roll-up")
+    # Weighted mean over rows matching statement; weight = Evidence_Confidence (from retrieval/ontology)
+    by_stmt = {}
+    for r in acc_rows:
+        d = _to_dict(r)
+        sid = d.get("Statement_Text_ID")
+        acc = float(d.get("Fact_Accuracy",0.0))
+        # find matching retrieval/ontology Evidence_Confidence
+        evc = 0.0
+        for o in on_rows:
+            if o.get("Statement_Text_ID")==sid:
+                try: evc = max(evc, float(o.get("Evidence_Confidence",0.0)))
+                except Exception: pass
+        by_stmt.setdefault(sid, []).append((acc, evc))
+    roll = []
+    for sid, arr in by_stmt.items():
+        num = sum(a*w for a,w in arr)
+        den = sum(w for _,w in arr) or 1.0
+        ai = round(num/den, 2) if arr else 0.0
+        roll.append({"Statement_Text_ID": sid, "Analytic_Integrity": ai,
+                     "Support_Path_IDs":"[]", "Notes":""})
+    int_schema = s39.get_schema("integrity", {})
+    roll = _project_to_schema(roll, int_schema)
+    roll = stamp_rows(roll, panel, inp, "p02_is.step_09_integrity_rollup")
+    dump_jsonl(out_dir / "analytic_integrity.jsonl", roll)
+
+    # Catalog & roll-up is.json
+    cat = ["# Controls Catalog (IS 3.1..3.9)\n"]
+    for title, stack in [
+        ("p02/step_01_scaffold", s31), ("p02/step_02_time_modality", s32),
+        ("p02/step_03_evidential", s33), ("p02/step_04_causal", s34),
+        ("p02/step_05_is_claims", s35), ("p02/step_06_ontology", s36),
+        ("p02/step_07_retrieval", s37), ("p02/step_08_accuracy", s38),
+        ("p02/step_09_integrity_rollup", s39)
+    ]:
+        cat.append(f"## {title}\n")
+        for fp in stack.fingerprints:
+            cat.append(f"- {fp['kind']}: **{fp['name']}** — `{fp['path']}` (sha1: {fp['sha1']})")
+        cat.append("")
+    (out_dir / "_controls_catalog.md").write_text("\n".join(cat), encoding="utf-8")
+
+    rollup = {"counts":{
+                "statements":len(statements),
+                "scaffold":len(sc_rows),
+                "time_modality":len(tm_rows),
+                "evidential":len(ev_rows),
+                "causal":len(ca_rows),
+                "claims":len(claims),
+                "ontology":len(on_rows),
+                "retrieval":len(rt_rows),
+                "accuracy":len(acc_rows),
+                "integrity":len(roll)},
+              "input": str(inp), "input_sha1": sha1(inp),
+              "ts": dt.datetime.now(dt.timezone.utc).isoformat()}
+    (out_dir / "is.json").write_bytes(orjson.dumps(rollup))
+    (out_dir / "validation.json").write_text(orjson.dumps(validation).decode("utf-8"), encoding="utf-8")
+
+    print("[DONE] Created:")
+    for p in list_created(out_dir): print(f"  - {p}  ({p.stat().st_size} bytes)")
+
+    if not args.no_mirror:
+        try:
+            mirror_artifacts(out_root, out_dir, list_created(out_dir), mode=args.mirror_mode)
+        except Exception as e:
+            print(f"[mirror] WARN: {e}")
+
+    if args.show:
+        for fname in ["scaffold.jsonl","time_modality.jsonl","evidential.jsonl","causal.jsonl","claims_is.jsonl","ontology.jsonl","retrieval.jsonl","accuracy.jsonl","analytic_integrity.jsonl"]:
+            head = out_dir / fname
+            if head.exists():
+                print(f"\n--- {fname} (head) ---")
+                with head.open("rb") as f:
+                    for i, line in enumerate(f):
+                        print(line.decode("utf-8").rstrip())
+                        if i >= 9: break
+
+if __name__ == "__main__":
+    main()
+

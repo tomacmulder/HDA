@@ -1,0 +1,27 @@
+{
+  "file": "amus.jsonl",
+  "columns": [
+    {"name":"AMU_ID","type":"string"},
+    {"name":"Parent_Statement_ID","type":"string"},
+    {"name":"Text_Span","type":"string"},
+    {"name":"Char_Start","type":"number"},
+    {"name":"Char_End","type":"number"},
+    {"name":"AMU_Type","type":"string"},
+    {"name":"AMU_Gloss","type":"string"},
+    {"name":"AMU_Illocution","type":"string"},
+    {"name":"Coref_Links","type":"string"},
+    {"name":"Numerical_Spans","type":"string"},
+    {"name":"Topic_Candidates","type":"string"},
+    {"name":"Topic_Confidence","type":"number"},
+    {"name":"Confidence","type":"number"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

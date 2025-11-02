@@ -1,0 +1,13 @@
+﻿{
+  "economics": {
+    "demand": ["Economics.Market.Demand"],
+    "revenue": ["Economics.Financial.Revenue"],
+    "cost": ["Economics.Financial.Costs"],
+    "price": ["Economics.Market.Price"],
+    "growth": ["Economics.Performance.Growth"]
+  },
+  "ops": {
+    "productivity": ["Operations.Performance.Productivity"],
+    "throughput": ["Operations.Flow.Throughput"]
+  }
+}

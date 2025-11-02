@@ -1,0 +1,20 @@
+{
+  "file": "threads.jsonl",
+  "columns": [
+    {"name":"Statement_Text_ID","type":"string"},
+    {"name":"Thread_ID","type":"string"},
+    {"name":"Thread_Role","type":"string"},
+    {"name":"Anchor_Eligibility_Score","type":"number"},
+    {"name":"Role_Confidence","type":"number"},
+    {"name":"RST_Relation","type":"string"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

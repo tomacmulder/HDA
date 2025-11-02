@@ -1,0 +1,17 @@
+{
+  "file": "structural_summary.json",
+  "columns": [
+    {"name":"type","type":"string"},
+    {"name":"key","type":"string"},
+    {"name":"value","type":"string"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

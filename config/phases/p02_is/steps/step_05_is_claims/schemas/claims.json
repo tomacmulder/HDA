@@ -1,0 +1,28 @@
+{
+  "file": "claims_is.jsonl",
+  "columns": [
+    {"name":"Claim_ID","type":"string"},
+    {"name":"Statement_Text_ID","type":"string"},
+    {"name":"Text_Span","type":"string"},
+    {"name":"Char_Start","type":"number"},
+    {"name":"Char_End","type":"number"},
+    {"name":"Claim_Type","type":"string"},
+    {"name":"Polarity","type":"string"},
+    {"name":"Scope","type":"string"},
+    {"name":"Conditions","type":"string"},
+    {"name":"Quantifiers","type":"string"},
+    {"name":"Modality_Markers","type":"string"},
+    {"name":"Evidentials","type":"string"},
+    {"name":"Temporal_Scope","type":"string"},
+    {"name":"Epistemic_Strength","type":"number"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

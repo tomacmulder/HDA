@@ -1,0 +1,21 @@
+{
+  "file": "segments.jsonl",
+  "columns": [
+    {"name":"Document_Title","type":"string"},
+    {"name":"Order_Index","type":"number"},
+    {"name":"Statement_Text_ID","type":"string"},
+    {"name":"Statement_Text","type":"string"},
+    {"name":"Speaker_ID","type":"string"},
+    {"name":"Timestamp_Start","type":"string"},
+    {"name":"Timestamp_End","type":"string"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

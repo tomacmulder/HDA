@@ -1,0 +1,5 @@
+{
+  "supports_cues": ["agree", "supports", "consistent with", "confirms", "corroborates", "makes sense"],
+  "opposes_cues":  ["but", "however", "disagree", "contradict", "refute", "undermines", "inconsistent"],
+  "references_cues":["according to", "as stated", "as reported", "cites", "refers to", "see"]
+}

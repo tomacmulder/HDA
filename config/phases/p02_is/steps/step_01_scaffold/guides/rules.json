@@ -1,0 +1,7 @@
+{
+  "membership_markers": ["is a", "is an", "are a", "are an"],
+  "definition_markers": ["is defined as", "means", "refers to"],
+  "change_markers": ["increase", "decrease", "rise", "fall", "grew", "shrank"],
+  "negation_markers": ["not", "no ", "never", "n't"],
+  "belief_markers": ["think", "believe", "seems", "appears", "suggests"]
+}

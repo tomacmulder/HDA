@@ -1,0 +1,24 @@
+{
+    "file":  "entities.jsonl",
+    "columns":  [
+                    {
+                        "name":  "mention_id",
+                        "type":  "string"
+                    },
+                    {
+                        "name":  "span",
+                        "type":  "string"
+                    },
+                    {
+                        "allowed":  [
+                                        "PERSON",
+                                        "ORG",
+                                        "LOC",
+                                        "MISC"
+                                    ],
+                        "default":  "MISC",
+                        "name":  "entity_type",
+                        "type":  "enum"
+                    }
+                ]
+}

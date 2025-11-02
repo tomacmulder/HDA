@@ -1,0 +1,25 @@
+{
+  "file": "time_modality.jsonl",
+  "columns": [
+    {"name":"Statement_Text_ID","type":"string"},
+    {"name":"Time_Axis","type":"string"},
+    {"name":"Temporal_Horizon","type":"string"},
+    {"name":"Change_Tense_Signal","type":"string"},
+    {"name":"Epistemic_Modality","type":"string"},
+    {"name":"Epistemic_Force","type":"string"},
+    {"name":"Scope_Type","type":"string"},
+    {"name":"Alethic_Modality","type":"string"},
+    {"name":"Evidential_Mode","type":"string"},
+    {"name":"Scope_Population","type":"string"},
+    {"name":"Spatial_Frame","type":"string"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

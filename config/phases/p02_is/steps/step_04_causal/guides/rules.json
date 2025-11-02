@@ -1,0 +1,8 @@
+{
+  "edge_markers": {
+    "causes": ["because", "leads to", "causes", "results in"],
+    "enables": ["allows", "enables", "makes possible"],
+    "prevents": ["prevents", "stops", "blocks", "reduces"],
+    "correlates": ["correlates", "associated with", "linked to"]
+  }
+}

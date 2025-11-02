@@ -1,0 +1,22 @@
+{
+  "file": "retrieval.jsonl",
+  "columns": [
+    {"name":"Path_ID","type":"string"},
+    {"name":"Claim_ID","type":"string"},
+    {"name":"Statement_Text_ID","type":"string"},
+    {"name":"Retrieved_Fact_Summary","type":"string"},
+    {"name":"Evidence_Confidence","type":"number"},
+    {"name":"Evidence_Status","type":"string"},
+    {"name":"Primary_Sources","type":"string"},
+    {"name":"Update_Timestamp","type":"string"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

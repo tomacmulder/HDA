@@ -1,0 +1,52 @@
+﻿from __future__ import annotations
+from typing import Any, Dict
+
+__all__ = ["_coerce_dict", "extract_amus", "amuize"]
+
+def _coerce_dict(obj: Any) -> Dict[str, Any]:
+    """
+    Best-effort conversion to a plain dict for objects flowing through AMU code.
+    Side-effect free and safe during package import.
+    """
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return obj
+
+    # Namedtuple/dataclass style
+    for attr in ("_asdict", "__dict__"):
+        try:
+            data = getattr(obj, attr)
+        except Exception:
+            continue
+        try:
+            return dict(data() if callable(data) else data)
+        except Exception:
+            pass
+
+    # Last resort
+    try:
+        return dict(obj)
+    except Exception:
+        return {"value": obj}
+
+# Re-export the real extractor and a compatibility alias
+try:  # pragma: no cover
+    from .extract import extract_amus as extract_amus  # explicit re-export
+    from .extract import extract_amus as amuize        # legacy alias expected by run_is.py
+except Exception:
+    # Keep module importable even if extract isn't available yet
+    def amuize(*_args, **_kwargs):  # type: ignore
+        raise ImportError("hdt.core.amu.extract.extract_amus is not available; cannot call amuize")
+# --- amu exports (amuize) ---
+# Ensure callers can always: from hdt.core.amu import amuize
+try:
+    from .extract import extract_amus as amuize
+except Exception:
+    def amuize(*args, **kwargs):
+        return []
+try:
+    __all__ = list(set(list(globals().get("__all__", [])) + ["amuize"]))
+except Exception:
+    pass
+# --- end amu exports ---

@@ -1,46 +1,58 @@
 ﻿from __future__ import annotations
-from typing import List
-import re
-from .schema import ScaffoldRow
-from ..amu.schema import AMU
-from ..segment.spans import Statement
+from typing import List, Dict, Any
+import json, re
 
-# simple dictionaries / regexes; deterministic and language-agnostic-ish
-_CHANGE = re.compile(r"\b(increase|increased|increases|grow|grew|grown|rise|rose|fallen|fall|drop|decline|improve|worsen)\b", re.I)
-_STATE_IS = re.compile(r"\b(is|are|was|were|be|been)\b", re.I)
-_MEMBERSHIP = re.compile(r"\b(is|are)\s+(an?|the)\b", re.I)
-_NEG = re.compile(r"\b(no|not|never|none|no\s+longer)\b", re.I)
-_INTENSION = re.compile(r"\b(think|believe|feel|claim|say|report|suggest|hope|guess)\b", re.I)
+def _lower(s:str)->str: return (s or "").lower()
 
-def build_scaffold(statements: List[Statement], amus: List[AMU]) -> List[ScaffoldRow]:
-    # map AMU by statement
-    amu_by_stmt = {a.Parent_Statement_ID: a for a in amus if a.AMU_Type == "d_prop"}
-    rows: List[ScaffoldRow] = []
+def analyze_amus(amus: List[Dict[str, Any]], guides: Dict[str, Any] | None=None) -> List[Dict[str, Any]]:
+    g = guides.get("guides.scaffold_rules", {}) if guides else {}
+    membership = [m.lower() for m in g.get("membership_markers", [])]
+    definition = [m.lower() for m in g.get("definition_markers", [])]
+    change     = [m.lower() for m in g.get("change_markers", [])]
+    negs       = [m.lower() for m in g.get("negation_markers", [])]
+    belief     = [m.lower() for m in g.get("belief_markers", [])]
 
-    for st in statements:
-        a = amu_by_stmt.get(st.id)
-        if not a:
+    out = []
+    for row in amus or []:
+        if (row.get("AMU_Type") or "").lower() != "d_prop":
             continue
-        # Exclude interrogatives for I1 (keep it clean)
-        if st.text.strip().endswith("?"):
-            continue
+        amu_id = row.get("AMU_ID")
+        span   = _lower(row.get("Text_Span",""))
 
-        text = st.text
-        if _CHANGE.search(text):
-            pred = "change_delta"; kind = "process"
-        elif _MEMBERSHIP.search(text):
-            pred = "membership"; kind = "state"
-        elif _STATE_IS.search(text):
-            pred = "state_is"; kind = "state"
+        # Event_Kind
+        if any(k in span for k in change):
+            kind = "process"
+        elif re.search(r"\b(\w+ing)\b", span):
+            kind = "process"
+        elif re.search(r"\b(won|reached|achieved|completed)\b", span):
+            kind = "achievement"
         else:
-            pred = "state_is"; kind = "state"
+            kind = "state"
 
-        neg = "explicit" if _NEG.search(text) else "none"
-        inten = "belief_about_world" if _INTENSION.search(text) else "extensional"
+        # Predication
+        if any(k in span for k in definition):
+            pred = "definition"
+        elif any(k in span for k in membership):
+            pred = "membership"
+        elif any(k in span for k in change):
+            pred = "change_delta"
+        else:
+            pred = "state_is"
 
-        rows.append(ScaffoldRow(
-            AMU_ID=a.AMU_ID,
-            Event_Kind=kind, Predication=pred,
-            Negation=neg, Intensionality=inten
-        ))
-    return rows
+        # Negation / Intensionality
+        neg = "explicit" if any(k in span for k in negs) else "none"
+        inten = "belief_about_world" if any(k in span for k in belief) else "extensional"
+
+        args = {}  # keep empty; later, slot-filling can enrich
+        out.append({
+            "AMU_ID": amu_id,
+            "Event_Kind": kind,
+            "Predication": pred,
+            "Arguments": json.dumps(args, ensure_ascii=False),
+            "Negation": neg,
+            "Intensionality": inten
+        })
+    return out
+# --- compat shim: legacy callers expect analyze(...) in scaffold.py
+def analyze(statements_or_amus, guides=None):
+    return analyze_amus(statements_or_amus, guides=guides)

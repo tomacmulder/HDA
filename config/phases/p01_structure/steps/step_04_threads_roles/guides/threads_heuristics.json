@@ -1,0 +1,9 @@
+{
+  "anchor_threshold": 0.5,
+  "new_thread_similarity_threshold": 0.20,
+  "weights": { "question_mark": 0.35, "long_text": 0.20, "claimy_terms": 0.25, "phatic_penalty": -0.40 },
+  "claimy_markers": ["therefore","thus","hence","shows","indicates"],
+  "phatic_markers": ["uh","um","you know","like","i mean"],
+  "question_markers": ["?"],
+  "length_min": 60
+}

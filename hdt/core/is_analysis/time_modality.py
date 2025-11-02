@@ -1,71 +1,102 @@
 ﻿from __future__ import annotations
-from typing import List
+from typing import List, Dict, Any
 import re
-from .schema import ModalRow
-from ..segment.spans import Statement
 
-_FUTURE = re.compile(r"\b(will|shall|going to|next|tomorrow|soon)\b", re.I)
-_PAST = re.compile(r"\b(yesterday|last\s+(week|month|year|quarter)|ago)\b", re.I)
-_COUNTERF = re.compile(r"\b(would|could|should)\b", re.I)
-_HEDGED = re.compile(r"\b(might|may|could|perhaps|possibly|likely|appears|suggests)\b", re.I)
-_QMARK = re.compile(r"\?\s*$")
-_SCOPE_UNI = re.compile(r"\b(all|every|each|always)\b", re.I)
-_SCOPE_GEN = re.compile(r"\b(most|usually|generally|often)\b", re.I)
-_SCOPE_LOCAL = re.compile(r"\b(locally|in\s+this|here|at\s+our)\b", re.I)
-_SCOPE_INDIV = re.compile(r"\b(this|that|a|an)\b", re.I)
+# Very conservative, deterministic cues. We can refine later.
+_FUTURE   = re.compile(r"\b(will|shall|going to|gonna|soon|tomorrow|next\s+(week|month|year))\b", re.I)
+_PAST     = re.compile(r"\b(yesterday|last\s+(week|month|year)|ago|formerly|previously|was|were|did|had)\b", re.I)
+_COUNTERF = re.compile(r"\b(would have|could have|should have|had\s+\w+ed\s+if|if\s+.*\bwould\b)\b", re.I)
+_QMARK    = re.compile(r"\?\s*$")
+_HEDGES   = re.compile(r"\b(might|may|could|possibly|perhaps|likely|unlikely|appears|seems)\b", re.I)
+_UNIV     = re.compile(r"\b(all|every|always|none)\b", re.I)
+_LOCAL    = re.compile(r"\b(most|many|often|usually|frequently|generally)\b", re.I)
+_INDIV    = re.compile(r"\b(i|you|he|she|they|we|this|that)\b", re.I)
 
-def analyze_time_modality(statements: List[Statement]) -> List[ModalRow]:
-    out: List[ModalRow] = []
+def _axis(text: str) -> str:
+    if _FUTURE.search(text): return "future"
+    if _PAST.search(text):   return "past"
+    return "present"
+
+def _tense_signal(text: str) -> str:
+    if _COUNTERF.search(text): return "counterfactual"
+    if _FUTURE.search(text):   return "future"
+    if _PAST.search(text):     return "past_reference"
+    return "present_trend"
+
+def _epi_modality(text: str) -> str:
+    if _COUNTERF.search(text): return "counterfactual"
+    if _QMARK.search(text):    return "interrogative"
+    if _HEDGES.search(text):   return "hedged"
+    return "certain"
+
+def _epi_force(text: str) -> str:
+    if _COUNTERF.search(text): return "weak"
+    if _QMARK.search(text):    return "weak"
+    if _HEDGES.search(text):   return "moderate"
+    return "strong"
+
+def _scope(text: str) -> str:
+    if _UNIV.search(text):  return "universal"
+    if _LOCAL.search(text): return "general"
+    if _INDIV.search(text): return "individual"
+    return "unspecified"
+
+def analyze(statements: List[Any]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
     for st in statements:
-        text = st.text
+        s = st.model_dump() if hasattr(st, "model_dump") else st
+        t = s.get("text", "")
+        rows.append({
+            "statement_id": s["id"],
+            "Time_Axis": _axis(t),
+            "Temporal_Horizon": "none",  # placeholder, add horizon heuristics later
+            "Change_Tense_Signal": _tense_signal(t),
+            "Epistemic_Modality": _epi_modality(t),
+            "Epistemic_Force": _epi_force(t),
+            "Scope_Type": _scope(t),
+        })
+    return rows
+# --- compatibility alias for callers expecting analyze_time_modality ---
+def analyze_time_modality(statements):
+    return analyze(statements)
+# --- compat shim: legacy callers expect analyze_time_modality(...)
+def analyze_time_modality(statements, guides=None):
+    return analyze(statements, guides=guides)
+# --- robust shim (overrides any earlier one) ---
+def analyze_time_modality(statements, guides=None):
+    """
+    Call the module's analyze(...) regardless of its signature.
+    Tries (statements, guides=...), then (statements, guides), then (statements).
+    """
+    try:
+        return analyze(statements, guides=guides)  # keyword
+    except TypeError:
+        try:
+            return analyze(statements, guides)     # positional
+        except TypeError:
+            return analyze(statements)             # bare
+# === tolerant adapters (EOF patch) ===
+# Capture original analyze if present
+try:
+    _HDT_TM_ORIG_ANALYZE = analyze  # type: ignore[name-defined]
+except Exception:
+    _HDT_TM_ORIG_ANALYZE = None
 
-        axis = "present"
-        signal = "none"
-        if _COUNTERF.search(text):
-            axis, signal = "future", "counterfactual"
-        elif _FUTURE.search(text):
-            axis, signal = "future", "future"
-        elif _PAST.search(text):
-            axis, signal = "past", "past_reference"
-        elif _QMARK.search(text):
-            axis, signal = "present", "none"
+def _hdt_tm_call(statements, guides=None):
+    fn = _HDT_TM_ORIG_ANALYZE
+    if callable(fn):
+        try:
+            return fn(statements, guides=guides)   # keyword
+        except TypeError:
+            try:
+                return fn(statements, guides)      # positional
+            except TypeError:
+                return fn(statements)              # bare
+    return []
 
-        # horizon heuristic
-        horizon = "none"
-        if re.search(r"\b(next|this)\s+(week|month)\b", text, re.I):
-            horizon = "short_term"
-        elif re.search(r"\b(next|this)\s+(quarter|year)\b", text, re.I):
-            horizon = "long_term"
+def analyze_time_modality(statements, guides=None):  # tolerant entry
+    return _hdt_tm_call(statements, guides)
 
-        # epistemic
-        if _QMARK.search(text):
-            modality, force = "interrogative", "none"
-        elif _COUNTERF.search(text):
-            modality, force = "counterfactual", "weak"
-        elif _HEDGED.search(text):
-            modality, force = "hedged", "moderate"
-        else:
-            modality, force = "certain", "strong"
-
-        # scope
-        if _SCOPE_UNI.search(text):
-            scope = "universal"
-        elif _SCOPE_GEN.search(text):
-            scope = "general"
-        elif _SCOPE_LOCAL.search(text):
-            scope = "local"
-        elif _SCOPE_INDIV.search(text):
-            scope = "individual"
-        else:
-            scope = "unspecified"
-
-        out.append(ModalRow(
-            Statement_Text_ID=st.id,
-            Time_Axis=axis,
-            Temporal_Horizon=horizon,
-            Change_Tense_Signal=signal,
-            Epistemic_Modality=modality,
-            Epistemic_Force=force,
-            Scope_Type=scope,
-        ))
-    return out
+# Also expose a tolerant "analyze" so callers importing analyze(...) work too
+def analyze(statements, guides=None):  # type: ignore[override]
+    return _hdt_tm_call(statements, guides)

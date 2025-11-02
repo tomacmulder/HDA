@@ -1,0 +1,6 @@
+{
+  "split_on_blank": true,
+  "min_len": 8,
+  "max_len": 600,
+  "speaker_pattern": "^(?:([A-Z][a-z]+|[A-Z]):)\\s+"
+}

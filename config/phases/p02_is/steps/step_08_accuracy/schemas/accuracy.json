@@ -1,0 +1,24 @@
+{
+  "file": "accuracy.jsonl",
+  "columns": [
+    {"name":"Path_ID","type":"string"},
+    {"name":"Claim_ID","type":"string"},
+    {"name":"Statement_Text_ID","type":"string"},
+    {"name":"Fact_Accuracy","type":"number"},
+    {"name":"Evidence_Match_Type","type":"string"},
+    {"name":"Bullshit_Index","type":"number"},
+    {"name":"Accuracy_Notes","type":"string"},
+    {"name":"Flag_Potential_Misinfo","type":"string"},
+    {"name":"Misinformation_Tags","type":"string"},
+    {"name":"Analytic_Integrity","type":"number"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

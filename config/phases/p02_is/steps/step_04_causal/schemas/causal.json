@@ -1,0 +1,18 @@
+{
+  "file": "causal.jsonl",
+  "columns": [
+    {"name":"SCM_Nodes","type":"string"},
+    {"name":"SCM_Edges","type":"string"},
+    {"name":"Assumptions","type":"string"},
+    {"name":"Mechanism_Role","type":"string"},
+        {"name":"Schema_Version","type":"string"},
+    {"name":"Lang","type":"string"},
+    {"name":"Script","type":"string"},
+    {"name":"Span_Indexing","type":"string"},
+    {"name":"Annotator","type":"string"},
+    {"name":"Annotator_ID","type":"string"},
+    {"name":"Annotator_Confidence","type":"number"},
+    {"name":"Review_Status","type":"string"},
+    {"name":"Provenance","type":"string","description":"JSON"}
+  ]
+}

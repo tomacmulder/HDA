@@ -1,0 +1,8 @@
+{
+  "counterfactual_markers": ["if ... had", "were to", "had it been", "should have"],
+  "future_markers": ["will", "going to", "soon", "next year"],
+  "past_markers": ["was", "were", "did", "previously", "last year"],
+  "hedge_markers": ["might", "may", "could", "appears", "likely", "possibly", "suggests"],
+  "scope_universal": ["all", "every", "always", "everyone"],
+  "scope_individual": ["this person", "he", "she", "they", "the firm"]
+}
