@@ -3,7 +3,7 @@ import os, argparse, hashlib, datetime as dt, orjson, json
 from pathlib import Path
 
 from hdt.core.control_resolver import ControlResolver
-from hdt.core.schema_ops import apply_schema  # (kept for compatibility even if unused)
+from hdt.core.schema_ops import apply_schema
 from hdt.core.schema_validate import validate_rows
 from hdt.core.pipeline.run import run_all_for_path
 from hdt.core.llm_client import LLMClient
@@ -17,6 +17,8 @@ from hdt.core.is_analysis.causal       import build_scm
 from hdt.core.is_analysis.ontology     import map_statements
 from hdt.core.is_analysis.accuracy     import score_statements
 from hdt.core.is_analysis.claims       import extract_claims_llm
+# [patched] 
+# [patched] from hdt.core.amu import amuize
 from hdt.core.output_router import mirror_artifacts
 from hdt.core.provenance import stamp_rows
 
@@ -37,53 +39,6 @@ def dump_jsonl(path: Path, rows):
     with open(path, "wb") as f:
         for r in (rows or []):
             f.write(orjson.dumps(_rowify(r))); f.write(b"\n")
-
-# ---------- interactive preview / confirm helpers ----------
-def _print_head(path: Path, n: int):
-    try:
-        with path.open("rb") as f:
-            for i, line in enumerate(f):
-                try:
-                    print(line.decode("utf-8", "replace").rstrip())
-                except Exception:
-                    print(str(line)[:200])
-                if i >= max(n - 1, 0):
-                    break
-    except Exception as e:
-        print(f"    [head] WARN: {e}")
-
-def _confirm_gate(args, title: str, files: list[Path] | None = None):
-    """
-    If --confirm (or HDT_CONFIRM_STEPS=1) is set, show sizes + heads then wait for user input.
-    Enter -> continue; 'q' -> abort; 's' -> skip remaining gates.
-    """
-    env_confirm = str(os.getenv("HDT_CONFIRM_STEPS", "0")).lower() in ("1","true","yes","on")
-    if not (getattr(args, "confirm", False) or env_confirm):
-        return
-
-    head_n_env = os.getenv("HDT_HEAD", "")
-    head_n = int(getattr(args, "head", 5) if getattr(args, "head", None) is not None else (int(head_n_env) if head_n_env else 5))
-    print(f"\n[confirm] {title}")
-    for p in (files or []):
-        try:
-            p = Path(p)
-            if p.exists():
-                print(f"  - {p}  ({p.stat().st_size} bytes)")
-                if head_n > 0:
-                    _print_head(p, head_n)
-            else:
-                print(f"  - MISSING: {p}")
-        except Exception as e:
-            print(f"  - [WARN] could not preview {p}: {e}")
-
-    try:
-        resp = input("\n↩️  Press Enter to continue, 'q' to abort, 's' to skip further confirms: ").strip().lower()
-    except EOFError:
-        resp = ""
-    if resp == "q":
-        print("[confirm] Aborted by user."); raise SystemExit(2)
-    if resp == "s":
-        args.confirm = False  # disable remaining gates
 
 def list_created(out_dir: Path):
     names = [
@@ -171,10 +126,6 @@ def main():
     ap.add_argument("--run-tag", default=None)
     ap.add_argument("--offline", action="store_true")
     ap.add_argument("--show",    action="store_true")
-    ap.add_argument("--confirm", action="store_true",
-                    help="Pause after each step and show heads; Enter to continue")
-    ap.add_argument("--head", type=int, default=int(os.getenv("HDT_HEAD", "5")),
-                    help="Lines to preview per file at confirm gates (default: 5)")
     ap.add_argument("--no-mirror", action="store_true")
     ap.add_argument("--mirror-mode", default=os.getenv("OUT_MIRROR_MODE","copy"),
                     choices=["copy","symlink","auto"])
@@ -195,8 +146,6 @@ def main():
     canon      = res.get("canon", {}) or {"note":"canon unavailable","counts":{"statements":len(statements)}}
     dump_jsonl(out_dir / "statements.jsonl", stamp_rows(statements, panel, inp, "p02_is.bootstrap"))
     dump_json(out_dir  / "canon.json", canon)
-
-    _confirm_gate(args, "After structure pass (bootstrap)", [out_dir / "statements.jsonl", out_dir / "canon.json"])
 
     offline = args.offline or os.getenv("HDT_OFFLINE") == "1"
     validation = {}
@@ -220,8 +169,6 @@ def main():
     dump_jsonl(out_dir / "scaffold.jsonl", sc_rows)
     validation["scaffold.jsonl"] = validate_rows(sc_rows, sc_schema)
 
-    _confirm_gate(args, "After 3.1 Scaffold", [out_dir / "scaffold.jsonl"])
-
     # 3.2 Time–Modality–Scope
     s32 = resolver.for_step("p02_is","step_02_time_modality")
     persist_prompt_policy(out_dir, "p02_is", "step_02_time_modality", s32.get_prompt("main",""))
@@ -237,8 +184,6 @@ def main():
     dump_jsonl(out_dir / "time_modality.jsonl", tm_rows)
     validation["time_modality.jsonl"] = validate_rows(tm_rows, tm_schema)
 
-    _confirm_gate(args, "After 3.2 Time–Modality–Scope", [out_dir / "time_modality.jsonl"])
-
     # 3.3 Evidence
     s33 = resolver.for_step("p02_is","step_03_evidential")
     persist_prompt_policy(out_dir, "p02_is", "step_03_evidential", s33.get_prompt("main",""))
@@ -251,8 +196,6 @@ def main():
     ev_rows = stamp_rows(ev_rows, panel, inp, "p02_is.step_03_evidential")
     dump_jsonl(out_dir / "evidential.jsonl", ev_rows)
     validation["evidential.jsonl"] = validate_rows(ev_rows, ev_schema)
-
-    _confirm_gate(args, "After 3.3 Evidence", [out_dir / "evidential.jsonl"])
 
     # 3.4 Causal skeleton
     s34 = resolver.for_step("p02_is","step_04_causal")
@@ -279,8 +222,6 @@ def main():
     dump_jsonl(out_dir / "causal.jsonl", ca_rows)
     validation["causal.jsonl"] = validate_rows(ca_rows, ca_schema)
 
-    _confirm_gate(args, "After 3.4 Causal skeleton", [out_dir / "causal.jsonl"])
-
     # 3.5 Claims (LLM)
     s35 = resolver.for_step("p02_is","step_05_is_claims")
     persist_prompt_policy(out_dir, "p02_is", "step_05_is_claims", s35.get_prompt("main",""))
@@ -301,8 +242,6 @@ def main():
     claims = stamp_rows(claims, panel, inp, "p02_is.step_05_is_claims")
     dump_jsonl(out_dir / "claims_is.jsonl", claims)
     validation["claims_is.jsonl"] = validate_rows(claims, cl_schema)
-
-    _confirm_gate(args, "After 3.5 Claims", [out_dir / "claims_is.jsonl"])
 
     # 3.6 Ontology mapping (basic pass; fill defaults)
     s36 = resolver.for_step("p02_is","step_06_ontology")
@@ -338,8 +277,6 @@ def main():
     dump_jsonl(out_dir / "ontology.jsonl", on_rows)
     validation["ontology.jsonl"] = validate_rows(on_rows, on_schema)
 
-    _confirm_gate(args, "After 3.6 Ontology mapping", [out_dir / "ontology.jsonl"])
-
     # 3.7 Retrieval (placeholder table: none -> no_data)
     s37 = resolver.for_step("p02_is","step_07_retrieval")
     persist_prompt_policy(out_dir, "p02_is", "step_07_retrieval", s37.get_prompt("main",""))
@@ -360,8 +297,6 @@ def main():
     rt_rows = stamp_rows(rt_rows, panel, inp, "p02_is.step_07_retrieval")
     dump_jsonl(out_dir / "retrieval.jsonl", rt_rows)
     validation["retrieval.jsonl"] = validate_rows(rt_rows, rt_schema)
-
-    _confirm_gate(args, "After 3.7 Retrieval", [out_dir / "retrieval.jsonl"])
 
     # 3.8 Accuracy
     s38 = resolver.for_step("p02_is","step_08_accuracy")
@@ -391,8 +326,6 @@ def main():
     dump_jsonl(out_dir / "accuracy.jsonl", acc_rows)
     validation["accuracy.jsonl"] = validate_rows(acc_rows, ac_schema)
 
-    _confirm_gate(args, "After 3.8 Accuracy & Integrity (accuracy)", [out_dir / "accuracy.jsonl"])
-
     # 3.9 Roll-up per statement
     s39 = resolver.for_step("p02_is","step_09_integrity_rollup")
     persist_prompt_policy(out_dir, "p02_is", "step_09_integrity_rollup", s39.get_prompt("main",""))
@@ -421,8 +354,6 @@ def main():
     roll = _project_to_schema(roll, int_schema)
     roll = stamp_rows(roll, panel, inp, "p02_is.step_09_integrity_rollup")
     dump_jsonl(out_dir / "analytic_integrity.jsonl", roll)
-
-    _confirm_gate(args, "After 3.9 Analytic Integrity roll-up", [out_dir / "analytic_integrity.jsonl"])
 
     # Catalog & roll-up is.json
     cat = ["# Controls Catalog (IS 3.1..3.9)\n"]
@@ -476,7 +407,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 # --- amu import shim ---
 # Provides a stable amuize() irrespective of package layout.
 try:
@@ -488,7 +418,6 @@ except Exception:
         def amuize(*args, **kwargs):
             return []
 # --- end amu import shim ---
-
 # --- fallback inputs shim ---
 # Materialize out\amus.jsonl and out\links.jsonl from Structure mirrors if missing.
 try:
@@ -532,3 +461,7 @@ try:
 except Exception as _shim_err:
     print(f"[WARN] inputs fallback shim error: {_shim_err}")
 # --- end shim ---
+
+
+
+
