@@ -58,10 +58,6 @@ def _print_head(path: Path, n: int):
         print(f"    [head] WARN: {e}")
 
 def _confirm_gate(args, title: str, files: Iterable[Path] = ()):
-    """
-    If --confirm (or HDT_CONFIRM_STEPS=1) is set, show sizes + heads then wait for user input.
-    Enter -> continue; 'q' -> abort; 's' -> skip remaining gates.
-    """
     env_confirm = str(os.getenv("HDT_CONFIRM_STEPS", "0")).lower() in ("1","true","yes","on")
     if not (getattr(args, "confirm", False) or env_confirm):
         return
@@ -90,9 +86,6 @@ def _confirm_gate(args, title: str, files: Iterable[Path] = ()):
 
 # ---------- input discovery (prefer latest IS outputs) ----------
 def _latest_run_subdir(root: Path) -> Optional[Path]:
-    """
-    Returns most recent subdir in root/runs/* that contains files.
-    """
     runs = []
     d = root / "runs"
     if d.exists():
@@ -113,8 +106,9 @@ def _first_existing(paths: Iterable[Path]) -> Optional[Path]:
 
 def _resolve_is_artifact(name: str) -> Optional[Path]:
     """
-    Try to locate an IS artifact by common locations (root, latest run, phases).
-    `name` is like 'statements.jsonl' or 'analytic_integrity.jsonl'
+    Locate an IS artifact by common locations (root, latest run, legacy phases).
+    `name` examples: 'statements.jsonl', 'analytic_integrity.jsonl',
+                    'claims_is.jsonl', 'scaffold.jsonl', 'causal.jsonl'
     """
     # 1) out\name
     p1 = Path("out") / name
@@ -122,21 +116,66 @@ def _resolve_is_artifact(name: str) -> Optional[Path]:
     latest = _latest_run_subdir(Path("out"))
     p2 = (latest / name) if latest else None
     # 3) legacy phases paths
-    legacy_map = {
-        "statements.jsonl": Path(r"out/phases/p01_structure/steps/step_01_segmentation/latest/statements.jsonl"),
-        "analytic_integrity.jsonl": Path(r"out/phases/p02_is/steps/step_39_integrity_rollup/latest/analytic_integrity.jsonl"),
+    legacy = {
+        "statements.jsonl":          Path(r"out/phases/p01_structure/steps/step_01_segmentation/latest/statements.jsonl"),
+        "analytic_integrity.jsonl":  Path(r"out/phases/p02_is/steps/step_39_integrity_rollup/latest/analytic_integrity.jsonl"),
+        "claims_is.jsonl":           Path(r"out/phases/p02_is/steps/step_05_is_claims/latest/claims_is.jsonl"),
+        "scaffold.jsonl":            Path(r"out/phases/p02_is/steps/step_01_scaffold/latest/scaffold.jsonl"),
+        "causal.jsonl":              Path(r"out/phases/p02_is/steps/step_04_causal/latest/causal.jsonl"),
     }
-    p3 = legacy_map.get(name)
+    p3 = legacy.get(name)
     return _first_existing([p1, p2, p3])
+
+def _load_jsonl(path: Optional[Path]) -> list[dict]:
+    if not path or not path.exists(): return []
+    rows = []
+    with path.open("rb") as f:
+        for line in f:
+            try: rows.append(orjson.loads(line))
+            except Exception: pass
+    return rows
+
+def _coerce_json(x):
+    """Accept dict/list or a JSON-encoded string and return dict/list (else None)."""
+    if isinstance(x, (dict, list)): return x
+    if isinstance(x, str) and x.strip():
+        try: return json.loads(x)
+        except Exception: return None
+    return None
+
+def _scm_from_causal_rows(causal_rows: list[dict]) -> list[dict]:
+    """
+    Normalize causal rows to a shape that wiring_analyze can use:
+      { "SCM_Nodes": [...], "SCM_Edges": [...], "Assumptions": {...}, "Mechanism_Role": "..." }
+    """
+    out = []
+    for r in (causal_rows or []):
+        d = dict(r)
+        nodes = _coerce_json(d.get("SCM_Nodes"))
+        edges = _coerce_json(d.get("SCM_Edges"))
+        assump = _coerce_json(d.get("Assumptions"))
+        out.append({
+            "SCM_Nodes": nodes or [],
+            "SCM_Edges": edges or [],
+            "Assumptions": assump or {"no_unmeasured_confounding": False, "positivity": False, "consistency": False},
+            "Mechanism_Role": d.get("Mechanism_Role","")
+        })
+    return out
 
 # ---------- main ----------
 def main():
     ap = argparse.ArgumentParser(description="OUGHT runner — 4.1..4.6")
-    # Default inputs now auto-resolve from IS outputs; flags let you override
+    # Optional explicit overrides; otherwise auto-resolve from latest IS outputs
     ap.add_argument("-s","--statements", dest="stm", default=None,
                     help="Path to statements.jsonl (defaults to latest IS output)")
     ap.add_argument("-i","--integrity", dest="integ", default=None,
                     help="Path to analytic_integrity.jsonl (defaults to latest IS output if present)")
+    ap.add_argument("--claims", dest="claims", default=None,
+                    help="Path to claims_is.jsonl (defaults to latest IS output)")
+    ap.add_argument("--scaffold", dest="scaffold", default=None,
+                    help="Path to scaffold.jsonl (defaults to latest IS output)")
+    ap.add_argument("--causal", dest="causal", default=None,
+                    help="Path to causal.jsonl (defaults to latest IS output)")
     ap.add_argument("-o","--out", dest="out", default="out_ought")
     ap.add_argument("--run-tag", default=None)
     ap.add_argument("--show", action="store_true")
@@ -153,19 +192,19 @@ def main():
     out_dir = (out_root / "runs" / args.run_tag) if args.run_tag else out_root
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # ---- Load prior results we need ----
+    # ---- Load IS artifacts (auto-discovered unless overridden) ----
     integ_path = Path(args.integ) if args.integ else _resolve_is_artifact("analytic_integrity.jsonl")
     stm_path   = Path(args.stm)   if args.stm   else _resolve_is_artifact("statements.jsonl")
+    claims_path = Path(args.claims) if args.claims else _resolve_is_artifact("claims_is.jsonl")
+    scaffold_path = Path(args.scaffold) if args.scaffold else _resolve_is_artifact("scaffold.jsonl")
+    causal_path = Path(args.causal) if args.causal else _resolve_is_artifact("causal.jsonl")
 
-    integ = []
-    if integ_path and integ_path.exists():
-        with integ_path.open("rb") as f:
-            integ = [orjson.loads(l) for l in f]
-
-    statements = []
-    if stm_path and stm_path.exists():
-        with stm_path.open("rb") as f:
-            statements = [orjson.loads(l) for l in f]
+    integ = _load_jsonl(integ_path)
+    statements = _load_jsonl(stm_path)
+    claims = _load_jsonl(claims_path)
+    scaffold = _load_jsonl(scaffold_path)
+    causal_rows = _load_jsonl(causal_path)
+    scm_rows = _scm_from_causal_rows(causal_rows)
 
     resolver = ControlResolver("config")
     panel = json.loads(Path("config/panel/global.json").read_text(encoding="utf-8"))
@@ -180,7 +219,6 @@ def main():
     de_rows = stamp_rows(de_rows, panel, stm_path or Path("."), "p03_ought.step_01_deontic")
     dump_jsonl(out_dir / "deontic.jsonl", de_rows)
     validation["deontic.jsonl"] = validate_rows(de_rows, de_schema)
-
     _confirm_gate(args, "After 4.1 Deontic", [out_dir / "deontic.jsonl"])
 
     # 4.2 Ends & Means
@@ -191,19 +229,22 @@ def main():
     em_rows = stamp_rows(em_rows, panel, stm_path or Path("."), "p03_ought.step_02_ends_means")
     dump_jsonl(out_dir / "ends_means.jsonl", em_rows)
     validation["ends_means.jsonl"] = validate_rows(em_rows, em_schema)
-
     _confirm_gate(args, "After 4.2 Ends & Means", [out_dir / "ends_means.jsonl"])
 
-    # 4.3 Wiring / Proportionality
+    # 4.3 Wiring / Proportionality (now uses claims + scaffold + SCM)
     s43 = resolver.for_step("p03_ought","step_03_wiring_proportionality")
     persist_prompt_policy(out_dir, "p03_ought","step_03_wiring_proportionality", s43.get_prompt("main",""))
     wr_schema = s43.get_schema("wiring", {})
-    # For now, pass empty claims/scm (can be wired to IS outputs later)
-    wr_rows = wiring_analyze(em_rows, claims=[], scm_rows=[], guides=s43)
+
+    wr_rows = wiring_analyze(
+        em_rows,
+        claims=claims or [],
+        scm_rows=scm_rows or [],
+        guides=s43
+    )
     wr_rows = stamp_rows(wr_rows, panel, stm_path or Path("."), "p03_ought.step_03_wiring_proportionality")
     dump_jsonl(out_dir / "wiring.jsonl", wr_rows)
     validation["wiring.jsonl"] = validate_rows(wr_rows, wr_schema)
-
     _confirm_gate(args, "After 4.3 Wiring / Proportionality", [out_dir / "wiring.jsonl"])
 
     # 4.4 Pragmatics
@@ -214,7 +255,6 @@ def main():
     pr_rows = stamp_rows(pr_rows, panel, stm_path or Path("."), "p03_ought.step_04_pragmatics_strength")
     dump_jsonl(out_dir / "pragmatics.jsonl", pr_rows)
     validation["pragmatics.jsonl"] = validate_rows(pr_rows, pr_schema)
-
     _confirm_gate(args, "After 4.4 Pragmatics", [out_dir / "pragmatics.jsonl"])
 
     # 4.5 Stance & Values
@@ -225,7 +265,6 @@ def main():
     st_rows = stamp_rows(st_rows, panel, stm_path or Path("."), "p03_ought.step_05_stance_values")
     dump_jsonl(out_dir / "stance_values.jsonl", st_rows)
     validation["stance_values.jsonl"] = validate_rows(st_rows, st_schema)
-
     _confirm_gate(args, "After 4.5 Stance & Values", [out_dir / "stance_values.jsonl"])
 
     # 4.6 Integrity & Fusion
@@ -236,7 +275,6 @@ def main():
     fu_rows = stamp_rows(fu_rows, panel, stm_path or Path("."), "p03_ought.step_06_integrity_fusion")
     dump_jsonl(out_dir / "integrity_fusion.jsonl", fu_rows)
     validation["integrity_fusion.jsonl"] = validate_rows(fu_rows, fu_schema)
-
     _confirm_gate(args, "After 4.6 Integrity & Fusion", [out_dir / "integrity_fusion.jsonl"])
 
     # Validation + rollup
@@ -247,8 +285,24 @@ def main():
        "pragmatics":len(pr_rows),"stance_values":len(st_rows),"integrity_fusion":len(fu_rows)},
        "input_statements": str(stm_path) if stm_path else "",
        "input_integrity":  str(integ_path) if integ_path else "",
+       "input_claims":     str(claims_path) if claims_path else "",
+       "input_scaffold":   str(scaffold_path) if scaffold_path else "",
+       "input_causal":     str(causal_path) if causal_path else "",
        "ts": dt.datetime.now(dt.timezone.utc).isoformat()}
     dump_json(out_dir / "ought.json", rollup)
+
+    # Controls catalog for traceability
+    cat = ["# Controls Catalog (OUGHT 4.1..4.6)\n"]
+    for title, stack in [
+        ("p03/step_01_deontic", s41), ("p03/step_02_ends_means", s42),
+        ("p03/step_03_wiring_proportionality", s43), ("p03/step_04_pragmatics_strength", s44),
+        ("p03/step_05_stance_values", s45), ("p03/step_06_integrity_fusion", s46)
+    ]:
+        cat.append(f"## {title}\n")
+        for fp in stack.fingerprints:
+            cat.append(f"- {fp['kind']}: **{fp['name']}** — `{fp['path']}` (sha1: {fp['sha1']})")
+        cat.append("")
+    (out_dir / "_controls_catalog.md").write_text("\n".join(cat), encoding="utf-8")
 
     if not args.no_mirror:
         try:
